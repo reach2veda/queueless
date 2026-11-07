@@ -93,7 +93,11 @@ export default function CustomerDashboard() {
       .get('/businesses')
       .then((res) => {
         if (res.data.businesses?.length > 0) {
-          setDemoBusiness(res.data.businesses[0]);
+          const preferred =
+            res.data.businesses.find((b) => b.serviceCount > 0) ||
+            res.data.businesses.find((b) => b.name === 'Metro Health Clinic') ||
+            res.data.businesses[0];
+          setDemoBusiness(preferred);
         }
       })
       .catch(() => {});

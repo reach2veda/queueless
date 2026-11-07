@@ -8,15 +8,33 @@ let ioInstance = null;
  * Supports authenticated sessions and scoped rooms
  */
 export const initSocketServer = (httpServer) => {
-  const allowedOrigins = [
-    process.env.CLIENT_URL || 'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-  ];
+  const getAllowedOrigins = () => {
+    const envUrl = process.env.CLIENT_URL || '';
+    const parsedFromEnv = envUrl
+      .split(',')
+      .map((u) => u.trim().replace(/\/$/, ''))
+      .filter(Boolean);
+
+    return [
+      ...parsedFromEnv,
+      'https://queueless-rho-swart.vercel.app',
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1:5173',
+    ];
+  };
 
   const io = new Server(httpServer, {
     cors: {
-      origin: allowedOrigins,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const cleanOrigin = origin.replace(/\/$/, '');
+        const allowed = getAllowedOrigins();
+        if (allowed.includes(cleanOrigin) || cleanOrigin.endsWith('.vercel.app')) {
+          return callback(null, true);
+        }
+        return callback(new Error(`CORS origin not allowed: ${origin}`));
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PATCH'],
     },

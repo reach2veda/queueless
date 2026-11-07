@@ -31,14 +31,56 @@ export const intervalsOverlap = (aStart, aEnd, bStart, bEnd) => {
 };
 
 /**
+ * Returns current date string (YYYY-MM-DD) and current minutes from midnight in a given timezone
+ * Defaults to Asia/Kolkata or UTC
+ */
+export const getNowInTimezone = (timezone = 'Asia/Kolkata') => {
+  const tz = timezone || 'Asia/Kolkata';
+  const now = new Date();
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const d = parts.find((p) => p.type === 'day')?.value;
+    const h = parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10);
+    const min = parseInt(parts.find((p) => p.type === 'minute')?.value || '0', 10);
+    return {
+      todayStr: `${y}-${m}-${d}`,
+      currentMinutesToday: h * 60 + min,
+    };
+  } catch (err) {
+    return {
+      todayStr: now.toISOString().slice(0, 10),
+      currentMinutesToday: now.getUTCHours() * 60 + now.getUTCMinutes(),
+    };
+  }
+};
+
+/**
  * Generates conflict-free appointment slots for a given business, service, and date
- * Respects business-level booking closures, holidays, blocked slots, and special hours
+ * Respects business-level booking closures, holidays, blocked slots, special hours, and timezone
  * @param {string} businessId
  * @param {string} serviceId
  * @param {string} dateStr - "YYYY-MM-DD"
  * @param {string} [staffId=null]
+ * @param {string} [timezone=null] - e.g. "Asia/Kolkata"
  */
-export const generateAvailableSlots = async (businessId, serviceId, dateStr, staffId = null) => {
+export const generateAvailableSlots = async (
+  businessId,
+  serviceId,
+  dateStr,
+  staffId = null,
+  timezone = null
+) => {
   // 1. Fetch Business & Service
   const [business, service] = await Promise.all([
     Business.findById(businessId),
@@ -106,6 +148,24 @@ export const generateAvailableSlots = async (businessId, serviceId, dateStr, sta
   const targetDate = new Date(Date.UTC(year, month - 1, day));
   const dayOfWeek = targetDate.getUTCDay();
 
+  // Determine current date and time in the relevant timezone (defaults to business timezone or Asia/Kolkata)
+  const effectiveTimezone = timezone || business.timezone || 'Asia/Kolkata';
+  const { todayStr, currentMinutesToday } = getNowInTimezone(effectiveTimezone);
+
+  // Check 4: Past dates cannot be booked
+  if (dateStr < todayStr) {
+    return {
+      date: dateStr,
+      dayOfWeek,
+      isOpen: false,
+      closureReason: 'Cannot book appointments for past dates.',
+      message: 'Cannot book appointments for past dates.',
+      businessName: business.name,
+      serviceName: service.name,
+      slots: [],
+    };
+  }
+
   // 3. Determine Operating Hours (Special hours override vs Regular WorkingHours)
   let openMinutes;
   let closeMinutes;
@@ -130,12 +190,23 @@ export const generateAvailableSlots = async (businessId, serviceId, dateStr, sta
     openMinutes = timeToMinutes(special.openTime);
     closeMinutes = timeToMinutes(special.closeTime);
   } else {
-    // Regular Working Hours
-    const schedule = await WorkingHours.findOne({
-      businessId,
-      staffId: staffId || null,
-      dayOfWeek,
-    });
+    // Regular Working Hours: Check staff-specific schedule if staffId given, fallback to business schedule
+    let schedule = null;
+    if (staffId) {
+      schedule = await WorkingHours.findOne({
+        businessId,
+        staffId,
+        dayOfWeek,
+      });
+    }
+
+    if (!schedule) {
+      schedule = await WorkingHours.findOne({
+        businessId,
+        staffId: null,
+        dayOfWeek,
+      });
+    }
 
     if (!schedule || !schedule.isOpen) {
       return {
@@ -187,10 +258,6 @@ export const generateAvailableSlots = async (businessId, serviceId, dateStr, sta
   // 6. Generate slots
   const slots = [];
   let currentStart = openMinutes;
-
-  const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
-  const currentMinutesToday = now.getHours() * 60 + now.getMinutes();
 
   while (currentStart + duration <= closeMinutes) {
     const currentEnd = currentStart + duration;

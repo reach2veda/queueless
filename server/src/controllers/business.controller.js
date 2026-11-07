@@ -106,13 +106,37 @@ export const getBusinesses = async (req, res, next) => {
       .limit(parseInt(limit, 10))
       .populate('ownerId', 'name email');
 
+    // Attach active service counts to each business
+    const serviceCounts = await Service.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: '$businessId', count: { $sum: 1 } } },
+    ]);
+    const serviceCountMap = {};
+    serviceCounts.forEach((sc) => {
+      serviceCountMap[sc._id.toString()] = sc.count;
+    });
+
+    const businessList = businesses.map((b) => {
+      const obj = b.toObject();
+      obj.serviceCount = serviceCountMap[b._id.toString()] || 0;
+      return obj;
+    });
+
+    // Prioritize businesses with active services, then by createdAt desc
+    businessList.sort((a, b) => {
+      if ((b.serviceCount > 0) !== (a.serviceCount > 0)) {
+        return b.serviceCount > 0 ? 1 : -1;
+      }
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
     return res.status(200).json({
       success: true,
-      count: businesses.length,
+      count: businessList.length,
       total,
       page: parseInt(page, 10),
       totalPages: Math.ceil(total / parseInt(limit, 10)),
-      businesses,
+      businesses: businessList,
     });
   } catch (error) {
     next(error);

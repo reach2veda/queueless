@@ -8,6 +8,7 @@ import {
   timeToMinutes,
   minutesToTime,
   intervalsOverlap,
+  getNowInTimezone,
 } from '../services/slot.service.js';
 import { generateBookingReference } from '../utils/reference.js';
 import { generateNextAppointmentToken } from '../services/token.service.js';
@@ -19,7 +20,7 @@ import { logAuditEvent } from '../utils/auditLogger.js';
  */
 export const getAvailability = async (req, res, next) => {
   try {
-    const { businessId, serviceId, date, staffId } = req.query;
+    const { businessId, serviceId, date, staffId, timezone } = req.query;
 
     if (!businessId || !serviceId || !date) {
       return res.status(400).json({
@@ -35,7 +36,8 @@ export const getAvailability = async (req, res, next) => {
       businessId,
       serviceId,
       date,
-      staffId || null
+      staffId || null,
+      timezone || null
     );
 
     return res.status(200).json({
@@ -134,12 +136,35 @@ export const createAppointment = async (req, res, next) => {
       });
     }
 
+    // Availability Check 4: Past dates and past time slots
+    const effectiveTimezone = business.timezone || 'Asia/Kolkata';
+    const { todayStr, currentMinutesToday } = getNowInTimezone(effectiveTimezone);
+    if (appointmentDate < todayStr) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Cannot book appointments for past dates.',
+          statusCode: 400,
+        },
+      });
+    }
+
     // 3. Compute endTime from startTime + durationMinutes
     const startMins = timeToMinutes(startTime);
+    if (appointmentDate === todayStr && startMins <= currentMinutesToday) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'This time slot has already passed for today. Please select an upcoming slot.',
+          statusCode: 400,
+        },
+      });
+    }
+
     const endMins = startMins + service.durationMinutes;
     const endTime = minutesToTime(endMins);
 
-    // Availability Check 4: Blocked Slots Overlap
+    // Availability Check 5: Blocked Slots Overlap
     const blockedSlot = business.blockedSlots?.find(
       (b) => b.date === appointmentDate && intervalsOverlap(startMins, endMins, timeToMinutes(b.startTime), timeToMinutes(b.endTime))
     );

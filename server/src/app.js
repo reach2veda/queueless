@@ -40,16 +40,31 @@ if (process.env.TRUST_PROXY !== undefined) {
 app.use(helmet());
 
 // Cross-Origin Resource Sharing (CORS) with credentials enabled
-const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:5173',
-];
+const getAllowedOrigins = () => {
+  const envUrl = process.env.CLIENT_URL || '';
+  const parsedFromEnv = envUrl
+    .split(',')
+    .map((u) => u.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
+  return [
+    ...parsedFromEnv,
+    'https://queueless-rho-swart.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+  ];
+};
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) {
+        return callback(null, true);
+      }
+      const cleanOrigin = origin.replace(/\/$/, '');
+      const allowed = getAllowedOrigins();
+      if (allowed.includes(cleanOrigin) || cleanOrigin.endsWith('.vercel.app')) {
         return callback(null, true);
       }
       return callback(new Error(`CORS policy does not allow access from origin ${origin}`));

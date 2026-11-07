@@ -135,6 +135,15 @@ export default function ExploreServicesPage() {
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>Verified</span>
                           </span>
+                          {b.serviceCount !== undefined && b.serviceCount > 0 ? (
+                            <span className="text-xs font-semibold text-[#16834A] bg-[#EAF6EE] px-2 py-0.5 rounded-md">
+                              {b.serviceCount} {b.serviceCount === 1 ? 'Service' : 'Services'}
+                            </span>
+                          ) : b.serviceCount === 0 ? (
+                            <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
+                              0 Services
+                            </span>
+                          ) : null}
                         </div>
                         <h3 className="text-lg font-bold text-[#17231C] mt-1">{b.name}</h3>
                         <p className="text-xs text-[#66736B] flex items-center space-x-1.5 mt-0.5">
@@ -181,12 +190,12 @@ export default function ExploreServicesPage() {
                       </Button>
                     </Link>
                     <Button
-                      variant="primary"
+                      variant={b.serviceCount === 0 ? 'outline' : 'primary'}
                       size="sm"
                       onClick={() => handleOpenBooking(b)}
                       rightIcon={<ArrowRight className="w-4 h-4" />}
                     >
-                      Book Appointment
+                      {b.serviceCount === 0 ? 'View Provider' : 'Book Appointment'}
                     </Button>
                   </div>
                 </div>

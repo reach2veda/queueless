@@ -29,10 +29,13 @@ export default function BookAppointmentModal({
   const [services, setServices] = useState([]);
   const [selectedServiceId, setSelectedServiceId] = useState(initialServiceId || '');
   const [selectedDate, setSelectedDate] = useState(() => {
-    // Default to tomorrow's date in YYYY-MM-DD
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().slice(0, 10);
+    // Default to tomorrow or next business day (skips Sunday if closed)
+    const target = new Date();
+    target.setDate(target.getDate() + 1);
+    if (target.getDay() === 0) {
+      target.setDate(target.getDate() + 1);
+    }
+    return target.toISOString().slice(0, 10);
   });
   const [slotsData, setSlotsData] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -54,8 +57,12 @@ export default function BookAppointmentModal({
         .then((res) => {
           const srvList = res.data.services || [];
           setServices(srvList);
-          if (srvList.length > 0 && !selectedServiceId) {
-            setSelectedServiceId(srvList[0]._id);
+          if (srvList.length > 0) {
+            if (!selectedServiceId || !srvList.some((s) => s._id === selectedServiceId)) {
+              setSelectedServiceId(srvList[0]._id);
+            }
+          } else {
+            setSelectedServiceId('');
           }
         })
         .catch((err) => {
@@ -82,9 +89,11 @@ export default function BookAppointmentModal({
       setSelectedSlot(null);
       setErrorMessage('');
 
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+
       api
         .get(
-          `/availability?businessId=${business._id}&serviceId=${selectedServiceId}&date=${selectedDate}`
+          `/availability?businessId=${business._id}&serviceId=${selectedServiceId}&date=${selectedDate}&timezone=${encodeURIComponent(tz)}`
         )
         .then((res) => {
           setSlotsData(res.data.data);
@@ -101,8 +110,8 @@ export default function BookAppointmentModal({
 
   // Check master booking closure
   const isMasterClosed = business?.isBookingsOpen === false || slotsData?.isBookingsOpen === false;
-  const isDateClosed = slotsData && !slotsData.isOpen;
-  const isBookingDisabled = isMasterClosed || isDateClosed || !selectedSlot;
+  const isDateClosed = Boolean(slotsData && !slotsData.isOpen);
+  const isBookingDisabled = isMasterClosed || isDateClosed || !selectedSlot || bookingLoading;
 
   const handleBooking = async () => {
     if (!selectedSlot) {
@@ -304,149 +313,179 @@ export default function BookAppointmentModal({
                 </div>
               )}
 
-              {/* Step 1: Service Selection */}
-              <div className="space-y-3">
-                <label className="block text-xs font-bold text-[#17231C] uppercase tracking-wider">
-                  1. Select Service
-                </label>
+              {/* If business has no services configured */}
+              {!loadingServices && services.length === 0 ? (
+                <div className="p-6 rounded-2xl bg-amber-50 border border-amber-200 text-center space-y-3">
+                  <AlertTriangle className="w-8 h-8 text-amber-600 mx-auto" />
+                  <h4 className="font-bold text-[#17231C]">No Services Available</h4>
+                  <p className="text-xs text-[#66736B] max-w-sm mx-auto">
+                    This provider does not have any active services configured yet. Please select an active provider such as Metro Health Clinic.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Step 1: Service Selection */}
+                  <div className="space-y-3">
+                    <label className="block text-xs font-bold text-[#17231C] uppercase tracking-wider">
+                      1. Select Service
+                    </label>
 
-                {loadingServices ? (
-                  <p className="text-xs text-[#66736B]">Loading services...</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {services.map((srv) => (
-                      <div
-                        key={srv._id}
-                        onClick={() => setSelectedServiceId(srv._id)}
-                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                          selectedServiceId === srv._id
-                            ? 'bg-[#EAF6EE] border-[#16834A] shadow-soft'
-                            : 'bg-white border-[#E3EAE5] hover:border-[#16834A]/40'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <h4 className="font-bold text-[#17231C] text-xs sm:text-sm">
-                            {srv.name}
-                          </h4>
-                          <span className="text-xs font-bold text-[#11643A]">
-                            ${srv.price}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#66736B] line-clamp-2 mt-1">
-                          {srv.description}
-                        </p>
-                        <div className="flex items-center space-x-1 text-[11px] text-[#16834A] font-semibold mt-2">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>{srv.durationMinutes} mins duration</span>
-                        </div>
+                    {loadingServices ? (
+                      <p className="text-xs text-[#66736B]">Loading services...</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {services.map((srv) => (
+                          <div
+                            key={srv._id}
+                            onClick={() => setSelectedServiceId(srv._id)}
+                            className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                              selectedServiceId === srv._id
+                                ? 'bg-[#EAF6EE] border-[#16834A] shadow-soft'
+                                : 'bg-white border-[#E3EAE5] hover:border-[#16834A]/40'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between">
+                              <h4 className="font-bold text-[#17231C] text-xs sm:text-sm">
+                                {srv.name}
+                              </h4>
+                              <span className="text-xs font-bold text-[#11643A]">
+                                ${srv.price}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#66736B] line-clamp-2 mt-1">
+                              {srv.description}
+                            </p>
+                            <div className="flex items-center space-x-1 text-[11px] text-[#16834A] font-semibold mt-2">
+                              <Clock className="w-3.5 h-3.5" />
+                              <span>{srv.durationMinutes} mins duration</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Step 2: Date Selection */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-[#17231C] uppercase tracking-wider">
-                  2. Select Date
-                </label>
-                <div className="relative max-w-xs">
-                  <Calendar className="w-4 h-4 text-[#66736B] absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="date"
-                    min={new Date().toISOString().slice(0, 10)}
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E3EAE5] bg-white text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#16834A]/25 focus:border-[#16834A]"
-                  />
-                </div>
-              </div>
-
-              {/* Step 3: Conflict-Free Time Slot Selection */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-[#17231C] uppercase tracking-wider">
-                    3. Available Time Slots
-                  </label>
-                  {slotsData && slotsData.isOpen && (
-                    <span className="text-xs text-[#16834A] font-semibold">
-                      {slotsData.availableSlotsCount} of {slotsData.totalSlots} slots open
-                    </span>
-                  )}
-                </div>
-
-                {loadingSlots ? (
-                  <div className="py-8 text-center text-xs text-[#66736B]">
-                    Calculating real-time availability from working hours & bookings...
-                  </div>
-                ) : isMasterClosed ? (
-                  <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-600 text-xs text-center">
-                    Appointment scheduling is currently paused by this provider.
-                  </div>
-                ) : !slotsData?.isOpen ? (
-                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start space-x-2.5">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold block">No slots available on this date</span>
-                      <span>{slotsData?.closureReason || slotsData?.message || 'The business is closed or on holiday on this date. Please select another date.'}</span>
+                  {/* Step 2: Date Selection */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-[#17231C] uppercase tracking-wider">
+                      2. Select Date
+                    </label>
+                    <div className="relative max-w-xs">
+                      <Calendar className="w-4 h-4 text-[#66736B] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="date"
+                        min={new Date().toISOString().slice(0, 10)}
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#E3EAE5] bg-white text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#16834A]/25 focus:border-[#16834A]"
+                      />
                     </div>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {slotsData.slots.map((slot, index) => {
-                      const isSelected = selectedSlot?.startTime === slot.startTime;
 
-                      if (!slot.isAvailable) {
-                        return (
-                          <div
-                            key={index}
-                            title={slot.reason || 'Unavailable'}
-                            className="p-2.5 rounded-xl border border-dashed border-[#E3EAE5] bg-slate-50 text-slate-400 text-center text-xs opacity-60 cursor-not-allowed select-none"
-                          >
-                            <span className="font-mono font-medium block">
-                              {slot.startTime}
-                            </span>
-                            <span className="text-[10px] block truncate">
-                              {slot.reason === 'Already Booked' ? 'Booked' : slot.reason || 'Unavailable'}
-                            </span>
-                          </div>
-                        );
-                      }
+                  {/* Step 3: Conflict-Free Time Slot Selection */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-[#17231C] uppercase tracking-wider">
+                        3. Available Time Slots
+                      </label>
+                      {slotsData && slotsData.isOpen && (
+                        <span className="text-xs text-[#16834A] font-semibold">
+                          {slotsData.availableSlotsCount} of {slotsData.totalSlots} slots open
+                        </span>
+                      )}
+                    </div>
 
-                      return (
-                        <button
-                          key={index}
-                          type="button"
-                          onClick={() => setSelectedSlot(slot)}
-                          className={`p-2.5 rounded-xl border text-center transition-all ${
-                            isSelected
-                              ? 'bg-[#16834A] text-white border-[#16834A] shadow-sm font-bold'
-                              : 'bg-white border-[#E3EAE5] text-[#17231C] hover:border-[#16834A]/50 hover:bg-[#F3FAF5]'
-                          }`}
-                        >
-                          <span className="font-mono font-semibold text-xs block">
-                            {slot.startTime} - {slot.endTime}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    {loadingSlots ? (
+                      <div className="py-8 text-center text-xs text-[#66736B] flex items-center justify-center space-x-2">
+                        <span className="w-2 h-2 rounded-full bg-[#16834A] animate-ping"></span>
+                        <span>Calculating real-time availability from working hours & bookings...</span>
+                      </div>
+                    ) : !selectedServiceId ? (
+                      <div className="p-4 rounded-2xl bg-[#F3FAF5] border border-[#E3EAE5] text-[#66736B] text-xs text-center">
+                        Please select a service above to view available time slots.
+                      </div>
+                    ) : isMasterClosed ? (
+                      <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 text-slate-600 text-xs text-center">
+                        Appointment scheduling is currently paused by this provider.
+                      </div>
+                    ) : slotsData && !slotsData.isOpen ? (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start space-x-2.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold block">No slots available on this date</span>
+                          <span>{slotsData?.closureReason || slotsData?.message || 'The business is closed or on holiday on this date. Please select another date.'}</span>
+                        </div>
+                      </div>
+                    ) : slotsData && slotsData.isOpen && slotsData.slots?.length === 0 ? (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs text-center">
+                        No operating hours configured for this date.
+                      </div>
+                    ) : slotsData && slotsData.isOpen && slotsData.availableSlotsCount === 0 ? (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start space-x-2.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold block">All slots fully booked</span>
+                          <span>All appointment slots for this date have been reserved. Please select another date.</span>
+                        </div>
+                      </div>
+                    ) : slotsData && slotsData.slots ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {slotsData.slots.map((slot, index) => {
+                          const isSelected = selectedSlot?.startTime === slot.startTime;
+
+                          if (!slot.isAvailable) {
+                            return (
+                              <div
+                                key={index}
+                                title={slot.reason || 'Unavailable'}
+                                className="p-2.5 rounded-xl border border-dashed border-[#E3EAE5] bg-slate-50 text-slate-400 text-center text-xs opacity-60 cursor-not-allowed select-none"
+                              >
+                                <span className="font-mono font-medium block">
+                                  {slot.startTime}
+                                </span>
+                                <span className="text-[10px] block truncate">
+                                  {slot.reason === 'Already Booked' ? 'Booked' : slot.reason || 'Unavailable'}
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <button
+                              key={index}
+                              type="button"
+                              onClick={() => setSelectedSlot(slot)}
+                              className={`p-2.5 rounded-xl border text-center transition-all ${
+                                isSelected
+                                  ? 'bg-[#16834A] text-white border-[#16834A] shadow-sm font-bold'
+                                  : 'bg-white border-[#E3EAE5] text-[#17231C] hover:border-[#16834A]/50 hover:bg-[#F3FAF5]'
+                              }`}
+                            >
+                              <span className="font-mono font-semibold text-xs block">
+                                {slot.startTime} - {slot.endTime}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
-                )}
-              </div>
 
-              {/* Step 4: Notes (Optional) */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-[#17231C]">
-                  Appointment Notes / Symptoms (Optional)
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="e.g. Follow-up consultation or specific symptoms..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-[#E3EAE5] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#16834A]/25 focus:border-[#16834A]"
-                />
-              </div>
+                  {/* Step 4: Notes (Optional) */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[#17231C]">
+                      Appointment Notes / Symptoms (Optional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Follow-up consultation or specific symptoms..."
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className="w-full p-3 rounded-xl border border-[#E3EAE5] bg-white text-xs focus:outline-none focus:ring-2 focus:ring-[#16834A]/25 focus:border-[#16834A]"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
