@@ -1,0 +1,20 @@
+{
+  "name": "queueless-monorepo",
+  "version": "1.0.0",
+  "description": "QueueLess - Smart Appointment Booking and Real-Time Queue Management Platform",
+  "scripts": {
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build:client": "npm --prefix client run build",
+    "start:server": "npm --prefix server start"
+  },
+  "keywords": [
+    "queueless",
+    "mern",
+    "queue-management",
+    "appointment-booking"
+  ],
+  "author": "",
+  "license": "ISC"
+}
+
